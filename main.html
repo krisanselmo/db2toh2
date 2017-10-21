@@ -1,0 +1,254 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="">
+    <meta name="Christophe Anselmo" content="">
+
+    <title>DB2 Script to H2</title>
+
+    <script src="https://code.jquery.com/jquery-3.2.1.min.js"></script>
+    <!-- Bootstrap core CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+  <script src="http://cdnjs.cloudflare.com/ajax/libs/ramda/0.25.0/ramda.min.js"></script>
+
+  <script src="https://ace.c9.io/build/src-min/ace.js" type="text/javascript" charset="utf-8"></script>
+
+    <style type="text/css">
+
+      body {
+        padding-top: 70px;
+      }
+      .starter-template {
+        padding: 40px 15px;
+        text-align: center;
+      }
+    </style>
+
+
+  </head>
+
+  <body>
+
+    <nav class="navbar navbar-inverse navbar-fixed-top">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand" href="#">DB2 Script to H2</a>
+        </div>
+        <div id="navbar" class="collapse navbar-collapse">
+<!--           <ul class="nav navbar-nav">
+            <li class="active"><a href="#">Home</a></li>
+            <li><a href="#about">About</a></li>
+            <li><a href="#contact">Contact</a></li>
+          </ul> -->
+        </div><!--/.nav-collapse -->
+      </div>
+    </nav>
+
+    <div class="container">
+
+    <pre id="editor"></pre>
+
+    <button type="button" class="btn btn-primary" onclick="compute()">Convert</button>
+
+
+    </div><!-- /.container -->
+
+    <script>
+
+    var converted = false;
+    var editor = ace.edit("editor");
+    editor.setTheme("ace/theme/monokai");
+    editor.session.setMode("ace/mode/sql");
+    editor.session.setUseWrapMode(true);
+    // editor.resize(true);
+    editor.$blockScrolling = Infinity;
+    editor.setOption("showPrintMargin", false)
+    editor.session.setOption('indentedSoftWrap', false);
+
+    editor.getSession().on('change', function() {
+      setTimeout(function() {
+          editor_content = editor.getValue();
+          if (!converted){
+              localStorage.setItem("editor_content", editor_content);
+          }
+      }, 100);
+    });
+
+
+    if (localStorage.getItem("editor_content") != null){
+        editor.setValue(localStorage.getItem("editor_content"));
+        editor.setValue(editor.getValue(), -1);
+    }
+
+
+    function resizeAce(id) {
+      return $(id).height($(window).height()/5*4);
+    };
+
+    //listen for changes
+    $(window).resize(resizeAce('#editor'));
+
+    // When page is ready
+    // $(function() {
+      // compute();
+      // resizeAce('#editor')
+    // });
+
+    function compute() {
+      // console.log(R.match(/([a-z]a)/g, 'bananas'))
+
+      var sql_script = editor.getValue();
+      var h2_script = sql_script;
+
+      // Useful tool for Regex -> https://regex101.com/
+
+      // Remove comment
+      h2_script = R.replace('--<ScriptOptions statementTerminator=";"/>', '', h2_script);
+
+      // Remove Large TABLESPACE
+      h2_script = R.replace(/CREATE LARGE TABLESPACE [\s\S]*OFF;/gm, '', h2_script);
+
+      // Remove comment column
+      h2_script = R.replace(/COMMENT ON COLUMN [\s\S]*;/gm, '', h2_script);
+
+      // Remove SQB
+      h2_script = R.replace(/CREATE SEQUENCE [\S]*_SQB .*;/gm, '', h2_script);
+
+      // Remove INDEX and UNIQUE INDEX (one match)
+      h2_script = R.replace(/CREATE INDEX [\s\S]*COMPRESS NO;/gm, '', h2_script);
+
+      // SQT 'START WITH 1'
+      h2_script = R.replace(/AS BIGINT [\s]*START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE [0-9]* NO CYCLE NO CACHE NO ORDER;/g, 'START WITH 1;', h2_script);
+
+      // Add 'IF NOT EXIST'
+      h2_script = R.replace(/CREATE SEQUENCE S/g, 'CREATE SEQUENCE IF NOT EXISTS S', h2_script);
+      h2_script = R.replace(/CREATE TABLE S/g, 'CREATE TABLE IF NOT EXISTS S', h2_script);
+      h2_script = R.replace(/ADD CONSTRAINT /g, 'ADD CONSTRAINT IF NOT EXISTS ', h2_script);
+
+      // TABLE // Remove DATA CAPTURE ... COMPRESS NO
+      h2_script = R.replace(/\)[\s]*DATA CAPTURE NONE [\sA-Z0-9]*COMPRESS NO;/g, ');', h2_script);
+
+      // TABLE // Replace GRAPHIC
+      h2_script = R.replace(/VARGRAPHIC/g, 'VARCHAR', h2_script);
+      h2_script = R.replace(/GRAPHIC/g, 'VARCHAR', h2_script);
+
+
+      // Get Tables name
+      regex = /CREATE TABLE IF NOT EXISTS ([\S]*) \(/g;
+      var matches, tables = [];
+      while (matches = regex.exec(h2_script)) {
+          tables.push(matches[1]);
+      }
+
+      // Get Sequences name
+      regex = /CREATE SEQUENCE IF NOT EXISTS ([\S]*) START WITH 1/g;
+      var matches, sqts = [];
+      while (matches = regex.exec(h2_script)) {
+          sqts.push(matches[1]);
+      }
+
+      // Add DROPs
+      output_content = ""
+      var lines = h2_script.split('\n');
+      for(var i = 0;i < lines.length;i++){
+          if (i>0 && R.test(/CREATE SCHEMA .*/,lines[i-1])){
+               output_content += '\n';
+              for(var j = 0;j < tables.length;j++){
+                  output_content += 'DROP TABLE IF EXISTS ' + tables[j] + ';\n\n'
+              }
+              for(var j = 0;j < sqts.length;j++){
+                  output_content += 'DROP SEQUENCE IF EXISTS ' + sqts[j] + ';\n\n'
+              }
+          }
+          output_content += lines[i] + '\n';
+      }
+      h2_script = output_content;
+
+
+      // Get Tables that contains sequence
+      // tablesWithSequence = getTableWithSequence(tables, sqts);
+
+      // Replace primary ID with sequence
+      h2_script = replaceWithSqt(h2_script);
+
+      // Remove double white lines
+      h2_script = R.replace(/^\s[\r\n]{2,}/gm, '\r\n', h2_script);
+
+
+      converted = true;
+      editor.setValue(h2_script, -1)
+      copyToClipboard(h2_script)
+    };
+
+
+    function getTableWithSequence(tables, sqts){
+        var tablesWithSequence = [];
+        for(var i = 0;i < tables.length;i++){
+            table = tables[i].split('.')[1];
+            for(var j = 0;j < sqts.length;j++){
+                if ( sqts[j].includes(table) ){
+                    tablesWithSequence.push(table);
+                }
+            }
+        }
+        return tablesWithSequence;
+    }
+
+    function replaceWithSqt(h2_script){
+        var output_content = ""
+        var regex = /CREATE TABLE IF NOT EXISTS ([\S]*) \(/;
+        var lines = h2_script.split('\n');
+        // Duplicate lines
+        var lines2 = lines;
+        for(var i = 0;i < lines.length;i++){
+            if (lines[i].includes('CREATE TABLE') ){
+                fName = regex.exec(lines[i])[1].split('.');
+                dbName = fName[0];
+                tableName = fName[1];
+                endOfTable = false
+                j = 1;
+                while (!endOfTable) {
+                    if (lines[i+j].includes('ID_' + tableName)){
+                        sqtName = dbName + '.' + "ID_" + tableName + "_SQT";
+                        lines2[i+j] = R.replace(/BIGINT NOT NULL/, 'BIGINT DEFAULT ' + sqtName + '.NEXTVAL NOT NULL', lines[i+j]);
+                    }
+
+                    if (lines[i+j].includes(');')){
+                        endOfTable = true;
+                    }
+                    j++;
+                }
+
+            }
+        }
+        for(var i = 0;i < lines.length;i++){
+            output_content += lines2[i] + '\n';
+        }
+        return output_content;
+    }
+
+    function copyToClipboard(str) {
+      var $temp = $("<input>");
+      $("body").append($temp);
+      $temp.val(str).select();
+      document.execCommand("copy");
+      $temp.remove();
+    }
+
+
+
+    </script>
+
+  </body>
+</html>
