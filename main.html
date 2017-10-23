@@ -117,8 +117,9 @@
       h2_script = R.replace('--<ScriptOptions statementTerminator=";"/>', '', h2_script);
 
       // Remove Large TABLESPACE
-      h2_script = R.replace(/CREATE LARGE TABLESPACE [\s\S]*OFF;/gm, '', h2_script);
-
+      h2_script = R.replace(/CREATE LARGE TABLESPACE [\s\S]*OFF;/gm, '', h2_script); 
+	  h2_script = R.replace(/CREATE LARGE TABLESPACE [\s\S]*0.06;/gm, '', h2_script); 
+	  
       // Remove comment column
       h2_script = R.replace(/COMMENT ON COLUMN [\s\S]*;/gm, '', h2_script);
 
@@ -132,6 +133,7 @@
       h2_script = R.replace(/AS BIGINT [\s]*START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE [0-9]* NO CYCLE NO CACHE NO ORDER;/g, 'START WITH 1;', h2_script);
 
       // Add 'IF NOT EXIST'
+	  h2_script = R.replace(/CREATE SCHEMA S/g, 'CREATE SCHEMA IF NOT EXISTS S', h2_script);
       h2_script = R.replace(/CREATE SEQUENCE S/g, 'CREATE SEQUENCE IF NOT EXISTS S', h2_script);
       h2_script = R.replace(/CREATE TABLE S/g, 'CREATE TABLE IF NOT EXISTS S', h2_script);
       h2_script = R.replace(/ADD CONSTRAINT /g, 'ADD CONSTRAINT IF NOT EXISTS ', h2_script);
